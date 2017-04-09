@@ -1,7 +1,12 @@
 #include <Servo.h>
+#include "Coroutines.h"
 
 #define trigPin 13
 #define echoPin 12
+
+const long stopDistance = 50; // Distance in cm when servo stops
+const int servoWaitTime = 30; // Time in ms that coroutine wait for servo to move
+const int servoStep = 1; // Angle that servo move per loop
 
 Servo myservo;  // create servo object to control a servo
 
@@ -13,7 +18,9 @@ long readings[numReadings];      // the readings from the input
 int readIndex = 0;              // the index of the current reading
 int total = 0;                  // the running total
 long average = 0;                // the average
-int range[180];
+
+Coroutines<1> coroutine;  // Create coroutine instance with 1 "thread"
+Coroutine* coroutineRef;  // Pointer to suspend and resume coroutine in the main loop
 
 void setup() {
   Serial.begin (9600);
@@ -24,45 +31,59 @@ void setup() {
   for (int thisReading = 0; thisReading < numReadings; thisReading++) {
     readings[thisReading] = 0;
   }
+
+  coroutineRef = &coroutine.start(moveTurret);
 }
 
 void loop() {   
-  
-  for (pos = 0; pos <= 177; pos += 1) { // goes from 0 degrees to 180 degrees
-    // in steps of 1 degree
-    myservo.write(pos);              // tell servo to go to position in variable 'pos'
-    delay(10);                       // waits 15ms for the servo to reach the position
-    
-    if(measureDistance() < 50){
-      pos -= 1;
-    }
-    
-  }
-  for (pos = 177; pos >= 0; pos -= 1) { // goes from 180 degrees to 0 degrees
-    myservo.write(pos);              // tell servo to go to position in variable 'pos'
-    delay(10);                       // waits 15ms for the servo to reach the position
 
-    if(measureDistance() < 50){
-      pos += 1;
+    coroutine.update();
+    measureDistance();
+    Serial.print(average);
+    Serial.print(" cm, ");
+    Serial.print("angle ");
+    Serial.println(pos);
+    
+    if(average < stopDistance){
+      coroutineRef->suspend();
+    } else {
+      coroutineRef->resume();
     }
-  }
  
 }
 
-long measureDistance() {
+void moveTurret(COROUTINE_CONTEXT(coroutine)) {
+
+  BEGIN_COROUTINE;
+    
+  for (pos = 0; pos <= 177; pos += servoStep) { // goes from 0 degrees to 180 degrees   
+    myservo.write(pos);              // tell servo to go to position in variable 'pos'
+    coroutine.wait(servoWaitTime);              // waits n ms for the servo to reach the position
+    COROUTINE_YIELD;
+  }
   
-    digitalWrite(trigPin, LOW);  // Added this line
-    delayMicroseconds(2); // Added this line
+  for (pos = 177; pos >= 0; pos -= servoStep) { // goes from 180 degrees to 0 degrees
+    myservo.write(pos);              // tell servo to go to position in variable 'pos'
+    coroutine.wait(servoWaitTime);              // waits n ms for the servo to reach the position
+    COROUTINE_YIELD;
+  }
+
+  coroutine.loop();
+  END_COROUTINE;
+}
+
+void measureDistance() {
+   
+    digitalWrite(trigPin, LOW);
+    delayMicroseconds(2);
     digitalWrite(trigPin, HIGH);
 
-    delayMicroseconds(10); // Added this line
+    delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
+    
     duration = pulseIn(echoPin, HIGH);
     distance = (duration/2) / 29.1;
-
-    Serial.println(distance);
-    
-    /*
+          
     // subtract the last reading:
     total = total - readings[readIndex];
     // read from the sensor:
@@ -79,10 +100,6 @@ long measureDistance() {
     }
 
     // calculate the average:
-    average = total / numReadings;
-    */
-    
-    return distance;
-    
-}
+    average = total / numReadings; 
 
+}
